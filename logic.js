@@ -103,4 +103,112 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("photo").click();
   });
 });
+// Tillora: improved automatic receipt reading
+document.addEventListener("DOMContentLoaded", () => {
+  const get = id => document.getElementById(id);
+  const read = get("readBtn");
+
+  read.addEventListener("click", async event => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const file = get("photo").files[0];
+    if (!file) return;
+
+    const status = get("status");
+    read.disabled = true;
+
+    try {
+      status.textContent = "Enhancing and reading receipt...";
+
+      if (!window.Tesseract) {
+        await new Promise((ok, fail) => {
+          const s = document.createElement("script");
+          s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+          s.onload = ok;
+          s.onerror = fail;
+          document.head.append(s);
+        });
+      }
+
+      const image = await createImageBitmap(file);
+      const scale = Math.min(
+        2.5,
+        2200 / image.width,
+        3500 / image.height
+      );
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(image.width * scale);
+      canvas.height = Math.round(image.height * scale);
+
+      const ctx = canvas.getContext("2d");
+      ctx.filter = "grayscale(1) contrast(1.5)";
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      image.close();
+
+      let result = (
+        await Tesseract.recognize(canvas, "eng")
+      ).data;
+
+      if (result.confidence < 70) {
+        status.textContent = "Checking original photo...";
+        const second = (
+          await Tesseract.recognize(file, "eng")
+        ).data;
+
+        if (second.confidence > result.confidence) {
+          result = second;
+        }
+      }
+
+      get("rawText").value = result.text;
+
+      const line = result.text.split(/\r?\n/).find(x =>
+        /\b(total|amount due|balance due|to pay)\b/i.test(x) &&
+        !/subtotal|sub total|change|cash|tender|vat|tax|savings/i.test(x)
+      );
+
+      const amounts = line?.match(/\d{1,5}[.,]\d{2}/g) || [];
+      const info = window.ReceiptLogic.extract(result.text);
+      const amount = Number(
+        amounts.at(-1)?.replace(",", ".")
+      );
+      const shop = info.merchant?.trim();
+
+      if (
+        result.confidence >= 70 &&
+        amounts.length &&
+        amount > 0 &&
+        amount < 10000 &&
+        shop &&
+        /[a-z]{3}/i.test(shop)
+      ) {
+        get("merchant").value = shop;
+        get("value").value = amount.toFixed(2);
+        get("purchaseDate").value =
+          info.date ||
+          window.ReceiptLogic.localDate(new Date());
+
+        get("category").value =
+          /tesco|asda|aldi|lidl|sainsbury|morrisons|waitrose/i.test(shop)
+            ? "Groceries"
+            : /primark|next|zara|h&m/i.test(shop)
+              ? "Shopping"
+              : "Other";
+
+        status.textContent = "Receipt recognised. Saving...";
+        get("entryForm").requestSubmit();
+      } else {
+        status.textContent =
+          "Could not read receipt reliably. Retake the photo. Nothing was saved.";
+      }
+    } catch (error) {
+      status.textContent = "Scan failed: " + error.message;
+    } finally {
+      read.disabled = false;
+    }
+  }, true);
+});
+
 
