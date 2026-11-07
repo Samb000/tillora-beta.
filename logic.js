@@ -98,3 +98,9 @@
 
   window.ReceiptLogic = { localDate, isDate, validState, totals, extract };
 })();
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("scanBtn").addEventListener("click", () => {
+    document.getElementById("photo").click();
+  });
+});
+
